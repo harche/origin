@@ -1,0 +1,23 @@
+{
+    "ID": 0,
+    "ProwJob": {
+        "Name": ""
+    },
+    "ClusterData": {
+        "Release": "4.21",
+        "FromRelease": "",
+        "Platform": "gcp",
+        "Architecture": "amd64",
+        "Network": "ovn",
+        "Topology": "ha",
+        "NetworkStack": "IPv4",
+        "CloudRegion": "us-central1",
+        "CloudZone": "us-central1-a",
+        "ClusterVersionHistory": [
+            "4.21.0-0.nightly-2025-09-15-042343"
+        ],
+        "MasterNodesUpdated": ""
+    },
+    "Tests": [],
+    "TestCount": 7
+}

@@ -1,0 +1,10 @@
+<testsuite name="openshift-tests" tests="7" skipped="0" failures="0" time="0">
+    <properties></properties>
+    <testcase name="[Jira:&#34;Test Framework&#34;] monitor test clusteroperator-collector preparation" time="4.1166e-05"></testcase>
+    <testcase name="[Jira:&#34;Test Framework&#34;] monitor test clusteroperator-collector setup" time="0.00030725"></testcase>
+    <testcase name="[Jira:&#34;Test Framework&#34;] monitor test clusteroperator-collector collection" time="2.075e-05"></testcase>
+    <testcase name="[Jira:&#34;Test Framework&#34;] monitor test clusteroperator-collector interval construction" time="4.58e-07"></testcase>
+    <testcase name="[Jira:&#34;Test Framework&#34;] monitor test clusteroperator-collector test evaluation" time="6.25e-07"></testcase>
+    <testcase name="[Jira:&#34;Test Framework&#34;] monitor test clusteroperator-collector cleanup" time="1.9083e-05"></testcase>
+    <testcase name="[Jira:&#34;Test Framework&#34;] monitor test clusteroperator-collector writing to storage" time="1.3083e-05"></testcase>
+</testsuite>
