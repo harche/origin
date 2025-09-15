@@ -10,7 +10,6 @@ import (
 	g "github.com/onsi/ginkgo/v2"
 	o "github.com/onsi/gomega"
 
-	draexample "github.com/openshift/origin/test/extended/dra/example"
 	helper "github.com/openshift/origin/test/extended/dra/helper"
 	"github.com/openshift/origin/test/extended/dra/nvidia"
 	exutil "github.com/openshift/origin/test/extended/util"
@@ -24,17 +23,12 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/kubernetes/test/e2e/framework"
-	e2epodutil "k8s.io/kubernetes/test/e2e/framework/pod"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 const (
-	// the test applies this label to the worker node that has been
-	// selected, the example driver will be installed on this node
-	exampleNodeLabel = "dra.e2e.openshift.io/example"
-
 	// NFD will apply this label to the worker node if
 	// an Nvidia GPU is present on the node
 	nvidiaGPU = "feature.node.kubernetes.io/pci-10de.present"
@@ -49,9 +43,6 @@ const (
 
 var _ = g.Describe("[sig-node] [Suite:openshift/dra-gpu-validation] [Feature:DynamicResourceAllocation]", g.Ordered, func() {
 	defer g.GinkgoRecover()
-
-	// whether drivers/operators should be uninstalled after the test suite is done
-	var removeDriver bool
 
 	// clients used by the setup code inside BeforeAll
 	var (
@@ -82,162 +73,14 @@ var _ = g.Describe("[sig-node] [Suite:openshift/dra-gpu-validation] [Feature:Dyn
 		setup.DynamicClient = dynamic
 	})
 
-	g.Context("[Driver:dra-example-driver]", func() {
-		var (
-			example *draexample.ExampleDRADriver
-			// the node on which the test pod will run
-			node *corev1.Node
-		)
-
-		// setup cert-manager, it's a dependency if you enable
-		// webook for the example dra driver
-		g.BeforeAll(func(ctx context.Context) {
-			namespace := "cert-manager"
-			cm := helper.NewHelmInstaller(g.GinkgoTB(), helper.HelmParameters{
-				Namespace:       namespace,
-				CreateNamespace: true,
-				Wait:            true,
-				ChartURL:        "oci://quay.io/jetstack/charts/cert-manager",
-				ReleaseName:     "cert-manager",
-				ChartVersion:    "v1.17.2",
-				Values: map[string]any{
-					"crds": map[string]any{
-						"enabled": true,
-					},
-				},
-			})
-			g.By("installing cert-manager")
-			o.Expect(cm.Install(ctx)).To(o.Succeed(), "cert-manager install should not fail")
-
-			if removeDriver {
-				g.DeferCleanup(func(ctx context.Context) {
-
-					g.By("cleaning up cert-manager")
-					o.Expect(cm.Remove(ctx)).ToNot(o.HaveOccurred(), "cert-manager cleanup should not fail")
-				})
-			}
-		})
-
-		// pick a worker node onto which the DRA driver will be
-		// installed, and the test pod(s) will run.
-		g.BeforeAll(func(ctx context.Context) {
-			client := clientset.CoreV1().Nodes()
-			result, err := client.List(ctx, metav1.ListOptions{
-				LabelSelector: fmt.Sprintf("%s=", "node-role.kubernetes.io/worker"),
-			})
-			o.Expect(err).Should(o.BeNil())
-			o.Expect(len(result.Items)).To(o.BeNumerically(">=", 1))
-
-			// choose the first worker node
-			node = &result.Items[0]
-
-			err = helper.EnsureNodeLabel(ctx, clientset, node.Name, exampleNodeLabel, "")
-			o.Expect(err).Should(o.BeNil())
-			t.Logf("node=%s has been selected, the test will be exercised on this node", node.Name)
-		})
-
-		// setup the example DRA driver
-		g.BeforeAll(func(ctx context.Context) {
-			namespace := "dra-example-driver"
-			o.Expect(helper.UsePrivilegedSCC(ctx, clientset, "dra-example-driver-service-account", namespace)).To(o.BeNil())
-			example = draexample.NewExampleDRADriver(g.GinkgoTB(), clientset, helper.HelmParameters{
-				Namespace:       namespace,
-				CreateNamespace: true,
-				ChartURL:        "oci://registry.k8s.io/dra-example-driver/charts/dra-example-driver",
-				ReleaseName:     "dra-example-driver",
-				ChartVersion:    "0.2.0",
-				Values: map[string]any{
-					"webhook": map[string]any{
-						"enabled": false,
-					},
-					// the plugin should run on the worker node we selected
-					"kubeletPlugin": map[string]any{
-						"nodeSelector": map[string]any{
-							exampleNodeLabel: "",
-						},
-					},
-				},
-			})
-
-			g.By("installing dra-example-driver")
-			o.Expect(example.Setup(ctx)).To(o.Succeed(), "dra-example-driver deployment should not fail")
-
-			if removeDriver {
-				g.DeferCleanup(func(ctx context.Context) {
-					g.By("cleaning up dra-example-driver")
-					o.Expect(example.Cleanup(ctx)).ToNot(o.HaveOccurred(), "dra-example-driver cleanup should not fail")
-				})
-			}
-
-			g.By("waiting for dra-example-driver to be ready")
-			o.Eventually(ctx, example.Ready).WithPolling(2*time.Second).Should(o.BeNil(), "dra-example-driver should be ready")
-		})
-
-		// initialize the framework object before any of our own BeforeEach func
-		var f *framework.Framework = framework.NewDefaultFramework("dra-common")
-
-		g.BeforeEach(func(ctx context.Context) {
-			g.By(fmt.Sprintf("waiting for the driver: %s to advertise its resources", example.Class()))
-			dc, slices := example.EventuallyPublishResources(ctx, node)
-			t.Logf("the driver has published deviceclasses: %s", framework.PrettyPrintJSON(dc))
-			t.Logf("the driver has published resourceslices: %s", framework.PrettyPrintJSON(slices))
-		})
-
-		g.It("one pod, one container, asking for 1 distinct GPU", func(ctx context.Context) {
-			devices, err := example.ListPublishedDevices(ctx, node)
-			o.Expect(err).Should(o.BeNil())
-			t.Logf("collected advertised devices from the resourceslices: %v", devices)
-			o.Expect(len(devices)).To(o.BeNumerically(">=", 1))
-
-			common := commonSpec{
-				f:                     f,
-				class:                 example.Class(),
-				node:                  node,
-				deviceNamesAdvertised: devices,
-				newContainer: func(name string) corev1.Container {
-					return corev1.Container{
-						Name:            name,
-						Image:           e2epodutil.GetDefaultTestImage(),
-						Command:         e2epodutil.GenerateScriptCmd("env && sleep 100000"),
-						SecurityContext: e2epodutil.GetRestrictedContainerSecurityContext(),
-					}
-				},
-			}
-			common.Test(ctx, g.GinkgoTB())
-		})
-	})
-
 	// Nvidia GPU driver setup and tests follow
 	g.Context("[Driver:dra-nvidia-driver]", func() {
 		// the gpu worker node we select where the test pods will run
 		var node *corev1.Node
 
-		// setup node-feature-discovery
+		// ensure that node-feature-discovery already labeled the GPU node for the tests
 		g.BeforeAll(func(ctx context.Context) {
-			namespace := "node-feature-discovery"
-			// the service account associated with the nfd worker should use the privileged SCC
-			o.Expect(helper.UsePrivilegedSCC(ctx, clientset, "node-feature-discovery-worker", namespace)).To(o.BeNil())
-
-			nfd := helper.NewHelmInstaller(g.GinkgoTB(), helper.HelmParameters{
-				Namespace:       namespace,
-				CreateNamespace: true,
-				ChartURL:        "https://github.com/kubernetes-sigs/node-feature-discovery/releases/download/v0.17.3/node-feature-discovery-chart-0.17.3.tgz",
-				Wait:            true,
-				ReleaseName:     "node-feature-discovery",
-				ChartVersion:    "v0.17.3",
-				Values:          nvidia.DefaultNFDHelmValues(),
-			})
-			g.By("installing node-feature-discovery")
-			o.Expect(nfd.Install(ctx)).To(o.Succeed(), "node-feature-discovery install should not fail")
-
-			if removeDriver {
-				g.DeferCleanup(func(ctx context.Context) {
-					g.By("cleaning up node-feature-discovery")
-					o.Expect(nfd.Remove(ctx)).ToNot(o.HaveOccurred(), "node-feature-discovery cleanup should not fail")
-				})
-			}
-
-			g.By("waiting for nfd to label the gpu worker node")
+			g.By("waiting for node-feature-discovery to label the gpu worker node")
 			o.Eventually(ctx, func(ctx context.Context) error {
 				result, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{
 					LabelSelector: fmt.Sprintf("%s=true", nvidiaGPU),
@@ -279,61 +122,17 @@ var _ = g.Describe("[sig-node] [Suite:openshift/dra-gpu-validation] [Feature:Dyn
 		})
 
 		var operator *nvidia.GpuOperator
-		// setup nvidia gpu operator
+		// ensure nvidia gpu operator components are ready
 		g.BeforeAll(func(ctx context.Context) {
-			parameters := helper.HelmParameters{
-				Namespace:       "nvidia-gpu-operator",
-				CreateNamespace: true,
-				ChartURL:        "https://helm.ngc.nvidia.com/nvidia/charts/gpu-operator-v25.3.2.tgz",
-				ReleaseName:     "gpu-operator",
-				ChartVersion:    "v25.3.2",
-				Wait:            true,
-				Values:          nvidia.DefaultGPUOperatorHelmValues(),
-			}
-			operator = nvidia.NewGPUOperatorInstaller(g.GinkgoTB(), clientset, setup, parameters)
-			g.By("installing nvidia-gpu-operator")
-			o.Expect(operator.Install(ctx)).To(o.Succeed(), "nvidia-gpu-operator install should not fail")
-
+			operator = nvidia.NewGPUOperator(g.GinkgoTB(), clientset, setup, "nvidia-gpu-operator")
 			g.By("waiting for nvidia-gpu-operator to be ready")
 			o.Expect(operator.Ready(ctx, node)).To(o.Succeed(), "nvidia-gpu-operator should be ready")
-
-			if removeDriver {
-				g.DeferCleanup(func(ctx context.Context) {
-					g.By("cleaning up nvidia-gpu-operator")
-					o.Expect(operator.Cleanup(ctx)).ToNot(o.HaveOccurred(), "nvidia-gpu-operator cleanup should not fail")
-				})
-			}
 		})
 
-		// setup nvidia-dra-driver-gpu
-		// TODO: the DRA driver is not included in the gpu operator yet
+		// ensure nvidia-dra-driver-gpu is ready for the tests
 		var driver *nvidia.NvidiaDRADriverGPU
 		g.BeforeAll(func(ctx context.Context) {
-			namespace := "nvidia-dra-driver-gpu"
-			// TODO: mps-control-daemon uses the default service account in this namespace
-			// and it needs to use the privileged SCC
-			o.Expect(helper.UsePrivilegedSCC(ctx, clientset, "default", namespace)).To(o.BeNil())
-
-			driver = nvidia.NewNvidiaDRADriverGPU(g.GinkgoTB(), clientset, helper.HelmParameters{
-				Namespace:       namespace,
-				CreateNamespace: true,
-				ChartURL:        "https://helm.ngc.nvidia.com/nvidia/charts/nvidia-dra-driver-gpu-25.3.1.tgz",
-				ReleaseName:     "nvidia-dra-driver-gpu",
-				ChartVersion:    "25.3.1",
-				Wait:            true,
-				Values:          nvidia.DefaultDRADriverHelmValues(),
-			})
-
-			g.By("installing nvidia-dra-driver-gpu")
-			o.Expect(driver.Setup(ctx)).To(o.Succeed(), "nvidia-dra-driver-gpu deployment should not fail")
-
-			if removeDriver {
-				g.DeferCleanup(func(ctx context.Context) {
-					g.By("cleaning up nvidia-dra-driver-gpu")
-					o.Expect(driver.Cleanup(ctx)).ToNot(o.HaveOccurred(), "nvidia-dra-driver-gpu cleanup should not fail")
-				})
-			}
-
+			driver = nvidia.NewNvidiaDRADriverGPU(g.GinkgoTB(), clientset, "nvidia-dra-driver-gpu")
 			g.By("waiting for nvidia-dra-driver-gpu to be ready")
 			o.Expect(driver.Ready(ctx, node)).To(o.Succeed(), "nvidia-dra-driver-gpu should be ready")
 		})

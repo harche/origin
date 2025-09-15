@@ -174,7 +174,7 @@ func GetAllocatedDeviceForRequest(request string, claim *resourceapi.ResourceCla
 }
 
 func ExecIntoContainer(ctx context.Context, t testing.TB, f *framework.Framework, name, namespace, container string, cmd []string) ([]string, error) {
-	t.Logf(fmt.Sprintf("exec into pod: %s, container: %s, command: %v", name, container, cmd))
+	t.Logf("exec into pod: %s, container: %s, command: %v", name, container, cmd)
 	stdout, stderr, err := e2epodutil.ExecWithOptionsContext(ctx, f, e2epodutil.ExecOptions{
 		Command:       cmd,
 		Namespace:     namespace,

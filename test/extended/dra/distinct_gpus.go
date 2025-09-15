@@ -149,7 +149,7 @@ func (spec distinctGPUsSpec) Test(ctx context.Context, t testing.TB) {
 		t.Logf("pod %s/%s has been allocated nvidia gpu: %s", pod.Namespace, pod.Name, result.Device)
 
 		ctr := pod.Spec.Containers[0]
-		g.By(fmt.Sprintf("running nvidia-smi command into the container %s/%s container: %s", pod.Namespace, pod.Name, ctr))
+		g.By(fmt.Sprintf("running nvidia-smi command into the container %s/%s container: %s", pod.Namespace, pod.Name, ctr.Name))
 		gpus, err := nvidia.QueryGPUUsedByContainer(ctx, t, spec.f, pod.Name, pod.Namespace, ctr.Name)
 		o.Expect(err).To(o.BeNil())
 		o.Expect(len(gpus)).To(o.Equal(1))

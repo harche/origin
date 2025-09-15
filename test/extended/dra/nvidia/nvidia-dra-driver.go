@@ -21,14 +21,13 @@ import (
 	helper "github.com/openshift/origin/test/extended/dra/helper"
 )
 
-func NewNvidiaDRADriverGPU(t testing.TB, clientset kubernetes.Interface, p helper.HelmParameters) *NvidiaDRADriverGPU {
+func NewNvidiaDRADriverGPU(t testing.TB, clientset kubernetes.Interface, namespace string) *NvidiaDRADriverGPU {
 	return &NvidiaDRADriverGPU{
 		t:         t,
 		name:      "nvidia-dra-driver-gpu",
 		class:     "gpu.nvidia.com",
-		namespace: p.Namespace,
+		namespace: namespace,
 		clientset: clientset,
-		helm:      helper.NewHelmInstaller(t, p),
 	}
 }
 
@@ -36,14 +35,11 @@ type NvidiaDRADriverGPU struct {
 	t         testing.TB
 	name      string
 	class     string
-	helm      *helper.HelmInstaller
 	clientset kubernetes.Interface
 	namespace string
 }
 
-func (d *NvidiaDRADriverGPU) Class() string                     { return "gpu.nvidia.com" }
-func (d *NvidiaDRADriverGPU) Setup(ctx context.Context) error   { return d.helm.Install(ctx) }
-func (d *NvidiaDRADriverGPU) Cleanup(ctx context.Context) error { return d.helm.Remove(ctx) }
+func (d *NvidiaDRADriverGPU) Class() string { return d.class }
 func (d *NvidiaDRADriverGPU) Ready(ctx context.Context, node *corev1.Node) error {
 	for _, probe := range []struct {
 		component string
@@ -62,7 +58,7 @@ func (d *NvidiaDRADriverGPU) Ready(ctx context.Context, node *corev1.Node) error
 		if probe.enabled {
 			g.By(fmt.Sprintf("waiting for %s to be ready", probe.component))
 			o.Eventually(func() error {
-				return helper.PodRunningReady(ctx, d.t, d.clientset, probe.component, d.helm.Namespace, probe.options)
+				return helper.PodRunningReady(ctx, d.t, d.clientset, probe.component, d.namespace, probe.options)
 			}).WithPolling(5*time.Second).
 				WithTimeout(10*time.Minute).Should(o.BeNil(), fmt.Sprintf("[%s] pod should be ready", probe.component))
 		}
@@ -95,7 +91,7 @@ func (d *NvidiaDRADriverGPU) EventuallyPublishResources(ctx context.Context, nod
 }
 
 func (d *NvidiaDRADriverGPU) RemovePluginFromNode(ctx context.Context, node *corev1.Node) error {
-	pods, err := d.clientset.CoreV1().Pods(d.helm.Namespace).List(ctx, metav1.ListOptions{
+	pods, err := d.clientset.CoreV1().Pods(d.namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "app.kubernetes.io/name" + "=" + d.name,
 		FieldSelector: "spec.nodeName" + "=" + node.Name,
 	})

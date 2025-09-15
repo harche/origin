@@ -127,7 +127,7 @@ func (spec gpuMIGSpec) Test(ctx context.Context, t testing.TB) {
 
 	migUsed := nvidia.NvidiaGPUs{}
 	for _, ctr := range pod.Spec.Containers {
-		g.By(fmt.Sprintf("running nvidia-smi command into the container %s/%s container: %s", pod.Namespace, pod.Name, ctr))
+		g.By(fmt.Sprintf("running nvidia-smi command into the container %s/%s container: %s", pod.Namespace, pod.Name, ctr.Name))
 		lines, err := helper.ExecIntoContainer(ctx, t, spec.f, pod.Name, pod.Namespace, ctr.Name,
 			[]string{"nvidia-smi", "-L"})
 		o.Expect(err).To(o.BeNil())
